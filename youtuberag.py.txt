@@ -1,0 +1,203 @@
+import streamlit as st
+import os
+import traceback
+
+# Try to import database, fall back gracefully if not available
+try:
+    from database import DatabaseManager
+    DATABASE_AVAILABLE = True
+except ImportError:
+    DATABASE_AVAILABLE = False
+    DatabaseManager = None
+
+# Import YouTube utilities
+from youtube_utils import YouTubeAPI
+
+# Page configuration
+st.set_page_config(
+    page_title="YouTube Knowledge Base",
+    page_icon="🎥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+def main():
+    """Main application"""
+    st.title("🎥 YouTube Knowledge Base")
+    st.markdown("Ask questions about YouTube channel content using AI-powered search")
+    
+    # Initialize database connection if available
+    db = None
+    if DATABASE_AVAILABLE:
+        @st.cache_resource
+        def init_database():
+            db = DatabaseManager()
+            if db.connect():
+                db.create_tables()
+                return db
+            return None
+        
+        db = init_database()
+    
+    # Check for API keys
+    youtube_api_key = os.getenv("GOOGLE_API_KEY", "")
+    openai_api_key = os.getenv("OPENAI_API_KEY", "")
+    gemini_api_key = os.getenv("GEMENI_API_KEY", "")
+    
+    # Determine which AI service is available
+    ai_service = None
+    if openai_api_key:
+        ai_service = "OpenAI"
+    elif gemini_api_key:
+        ai_service = "Gemini"
+    
+    # Show API key status
+    with st.sidebar:
+        st.header("⚙️ API Configuration")
+        
+        # YouTube API status
+        if youtube_api_key:
+            st.success("✅ YouTube API Key: Connected")
+        else:
+            st.error("❌ YouTube API Key: Missing")
+            st.markdown("Set `GOOGLE_API_KEY` environment variable")
+        
+        # AI API status
+        if ai_service:
+            st.success(f"✅ {ai_service} API Key: Connected")
+        else:
+            st.error("❌ AI API Key: Missing")
+            st.markdown("Set either `OPENAI_API_KEY` or `GEMENI_API_KEY` environment variable")
+        
+        # Database status
+        if db:
+            st.success("✅ Database: Connected")
+            # Show database stats
+            if db.conn:
+                stats = db.get_database_stats()
+                if stats:
+                    st.metric("Channels", stats.get('total_channels', 0))
+                    st.metric("Videos", stats.get('total_videos', 0))
+                    st.metric("Text Chunks", stats.get('total_chunks', 0))
+        else:
+            st.error("❌ Database: Connection failed")
+        
+        st.divider()
+        
+        # Show available features when APIs are ready
+        if youtube_api_key and ai_service:
+            st.subheader("🚀 Ready to Process")
+            
+            # Channel input
+            channel_id = st.text_input(
+                "YouTube Channel ID",
+                placeholder="UC1234567890abcdef",
+                help="Find the channel ID in the channel URL"
+            )
+            
+            max_videos = st.number_input(
+                "Max videos to process",
+                min_value=1,
+                max_value=100,
+                value=20,
+                help="Limit for testing and cost control"
+            )
+            
+            if st.button("🚀 Process Channel", type="primary"):
+                if channel_id:
+                    if youtube_api_key:
+                        st.info(f"Processing channel ID: {channel_id} for up to {max_videos} videos...")
+                        youtube_api = YouTubeAPI(youtube_api_key)
+                        
+                        with st.spinner("Fetching video IDs..."):
+                            video_ids = youtube_api.get_channel_video_ids(channel_id, max_videos)
+                        
+                        if video_ids:
+                            st.success(f"Found {len(video_ids)} videos.")
+                            st.write("Video IDs:", video_ids)
+                            
+                            # Placeholder for transcript acquisition
+                            with st.spinner("Acquiring video details and transcripts..."):
+                                processed_videos = youtube_api.get_video_details_and_transcripts(video_ids)
+                            
+                            if processed_videos:
+                                st.success("Video processing complete!")
+                                # Here you would typically store processed_videos into your database
+                                # and proceed with embedding and vector database operations.
+                            else:
+                                st.warning("No videos processed or transcripts acquired.")
+                        else:
+                            st.error("No video IDs found for the given channel or an error occurred.")
+                    else:
+                        st.error("YouTube API Key is missing. Please configure it in the sidebar.")
+                else:
+                    st.error("Please enter a valid YouTube Channel ID")
+    
+    # Main content area
+    if not youtube_api_key or not ai_service:
+        st.info("Please configure your API keys in the sidebar to get started.")
+        
+        # Show setup instructions
+        with st.expander("📋 Setup Instructions"):
+            st.markdown("""
+            ### Required API Keys
+            
+            **YouTube Data API Key:**
+            1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+            2. Create a new project or select existing one
+            3. Enable YouTube Data API v3
+            4. Create credentials (API Key)
+            5. Set as `GOOGLE_API_KEY` environment variable
+            
+            **AI API Key (choose one):**
+            
+            **Option 1: OpenAI API**
+            1. Go to [OpenAI Platform](https://platform.openai.com/)
+            2. Sign up or log in
+            3. Go to API Keys section
+            4. Create new API key
+            5. Set as `OPENAI_API_KEY` environment variable
+            
+            **Option 2: Google Gemini API**
+            1. Go to [Google AI Studio](https://aistudio.google.com/)
+            2. Sign up or log in
+            3. Get API key
+            4. Set as `GEMENI_API_KEY` environment variable
+            
+            ### How to Set Environment Variables in Replit
+            1. Click on "Secrets" in the left sidebar
+            2. Add your API keys as secrets
+            3. Restart the application
+            """)
+    else:
+        # Show that the app is ready but dependencies need to be installed
+        st.warning("⚠️ API keys are configured, but some Python dependencies need to be installed to fully process YouTube videos.")
+        
+        st.markdown("""
+        ### What this app will do once fully set up:
+        
+        1. **Fetch YouTube Videos**: Connect to any YouTube channel and get all video metadata
+        2. **Extract Transcripts**: Download video transcripts/captions automatically  
+        3. **Process Content**: Break down long videos into searchable chunks
+        4. **Build Knowledge Base**: Create a searchable database of video content
+        5. **AI-Powered Q&A**: Ask questions and get answers based on the actual video content
+        
+        ### Example Questions You Could Ask:
+        - "How do I set up a Python virtual environment?"
+        - "What are the best practices for web development?"
+        - "Can you summarize the main points about machine learning?"
+        
+        The AI will search through all the processed videos and provide answers with source links.
+        """)
+        
+        # Show example interface
+        st.subheader("💬 Question Interface (Preview)")
+        query = st.text_input(
+            "What would you like to know?",
+            placeholder="e.g., How do I deploy a web application?",
+            disabled=True
+        )
+        st.button("🔍 Ask", disabled=True, help="Available once processing is complete")
+
+if __name__ == "__main__":
+    main()
